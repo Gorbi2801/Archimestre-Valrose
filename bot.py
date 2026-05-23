@@ -774,25 +774,20 @@ async def liste_reactions(interaction: discord.Interaction, salon: discord.TextC
     if not message.reactions:
         await interaction.followup.send("⚠️ Ce message n'a reçu aucune réaction.", ephemeral=False)
         return
-    reacteurs: dict[int, discord.Member] = {}
+    reacteurs: set[discord.Member] = set()
     for reaction in message.reactions:
         async for user in reaction.users():
-            if user.bot or user.id in reacteurs:
-                continue
-            try:
-                member = await interaction.guild.fetch_member(user.id)
-                reacteurs[user.id] = member
-            except (discord.NotFound, discord.HTTPException):
-                reacteurs[user.id] = user
+            if not user.bot and isinstance(user, discord.Member):
+                reacteurs.add(user)
     if not reacteurs:
         await interaction.followup.send("⚠️ Aucun membre (hors bots) n'a réagi.", ephemeral=False)
         return
-    membres_tries = sorted(reacteurs.values(), key=lambda m: (m.display_name if hasattr(m, "display_name") else m.name).lower())
+    membres_tries = sorted(reacteurs, key=lambda m: m.display_name.lower())
     blocs = split_list(membres_tries)
     embed = discord.Embed(title="💬 Membres ayant réagi au message", color=discord.Color.blue())
     for i, bloc in enumerate(blocs):
         embed.add_field(name=f"Liste{' (suite)' if i > 0 else ''}", value=bloc, inline=False)
-    embed.set_footer(text=f"Total : {len(membres_tries)} membre(s)  |  Message dans #{salon.name}")
+    embed.set_footer(text=f"Total : {len(reacteurs)} membre(s)  |  Message dans #{salon.name}")
     await interaction.followup.send(embed=embed)
 
 
@@ -1027,19 +1022,28 @@ async def candidats_naissance(interaction: discord.Interaction, message_id: str)
         await interaction.followup.send("⚠️ Aucune réaction sur ce message.", ephemeral=False)
         return
 
-    # Collecte tous les candidats (hors bots)
-    # fetch_member() garantit un objet Member à jour même si non en cache
-    candidats: dict[int, discord.Member | discord.User] = {}
+    # Collecte d'abord tous les user IDs ayant réagi
+    raw_users: dict[int, discord.User] = {}
     for reaction in message.reactions:
         async for user in reaction.users():
-            if user.bot or user.id in candidats:
-                continue
-            try:
-                member = await interaction.guild.fetch_member(user.id)
-                candidats[user.id] = member
-            except (discord.NotFound, discord.HTTPException):
-                # Membre introuvable (a quitté le serveur) → garde l'objet User
-                candidats[user.id] = user
+            if not user.bot:
+                raw_users[user.id] = user
+
+    # Fetch groupé : une seule requête par batch de 100 au lieu de N requêtes
+    candidats: dict[int, discord.Member | discord.User] = {}
+    ids = list(raw_users.keys())
+    for i in range(0, len(ids), 100):
+        batch = ids[i:i+100]
+        try:
+            members = await interaction.guild.query_members(user_ids=batch, cache=True)
+            for m in members:
+                candidats[m.id] = m
+        except Exception:
+            pass
+    # Fallback pour les membres non trouvés (ont quitté le serveur)
+    for uid, user in raw_users.items():
+        if uid not in candidats:
+            candidats[uid] = user
 
     if not candidats:
         await interaction.followup.send("⚠️ Aucun candidat trouvé.", ephemeral=False)
