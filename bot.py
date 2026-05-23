@@ -774,20 +774,25 @@ async def liste_reactions(interaction: discord.Interaction, salon: discord.TextC
     if not message.reactions:
         await interaction.followup.send("⚠️ Ce message n'a reçu aucune réaction.", ephemeral=False)
         return
-    reacteurs: set[discord.Member] = set()
+    reacteurs: dict[int, discord.Member] = {}
     for reaction in message.reactions:
         async for user in reaction.users():
-            if not user.bot and isinstance(user, discord.Member):
-                reacteurs.add(user)
+            if user.bot or user.id in reacteurs:
+                continue
+            try:
+                member = await interaction.guild.fetch_member(user.id)
+                reacteurs[user.id] = member
+            except (discord.NotFound, discord.HTTPException):
+                reacteurs[user.id] = user
     if not reacteurs:
         await interaction.followup.send("⚠️ Aucun membre (hors bots) n'a réagi.", ephemeral=False)
         return
-    membres_tries = sorted(reacteurs, key=lambda m: m.display_name.lower())
+    membres_tries = sorted(reacteurs.values(), key=lambda m: (m.display_name if hasattr(m, "display_name") else m.name).lower())
     blocs = split_list(membres_tries)
     embed = discord.Embed(title="💬 Membres ayant réagi au message", color=discord.Color.blue())
     for i, bloc in enumerate(blocs):
         embed.add_field(name=f"Liste{' (suite)' if i > 0 else ''}", value=bloc, inline=False)
-    embed.set_footer(text=f"Total : {len(reacteurs)} membre(s)  |  Message dans #{salon.name}")
+    embed.set_footer(text=f"Total : {len(membres_tries)} membre(s)  |  Message dans #{salon.name}")
     await interaction.followup.send(embed=embed)
 
 
