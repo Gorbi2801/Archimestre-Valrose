@@ -1022,28 +1022,19 @@ async def candidats_naissance(interaction: discord.Interaction, message_id: str)
         await interaction.followup.send("⚠️ Aucune réaction sur ce message.", ephemeral=False)
         return
 
-    # Collecte d'abord tous les user IDs ayant réagi
-    raw_users: dict[int, discord.User] = {}
+    # Collecte tous les candidats (hors bots)
+    # fetch_member() garantit un objet Member à jour même si non en cache
+    candidats: dict[int, discord.Member | discord.User] = {}
     for reaction in message.reactions:
         async for user in reaction.users():
-            if not user.bot:
-                raw_users[user.id] = user
-
-    # Fetch groupé : une seule requête par batch de 100 au lieu de N requêtes
-    candidats: dict[int, discord.Member | discord.User] = {}
-    ids = list(raw_users.keys())
-    for i in range(0, len(ids), 100):
-        batch = ids[i:i+100]
-        try:
-            members = await interaction.guild.query_members(user_ids=batch, cache=True)
-            for m in members:
-                candidats[m.id] = m
-        except Exception:
-            pass
-    # Fallback pour les membres non trouvés (ont quitté le serveur)
-    for uid, user in raw_users.items():
-        if uid not in candidats:
-            candidats[uid] = user
+            if user.bot or user.id in candidats:
+                continue
+            try:
+                member = await interaction.guild.fetch_member(user.id)
+                candidats[user.id] = member
+            except (discord.NotFound, discord.HTTPException):
+                # Membre introuvable (a quitté le serveur) → garde l'objet User
+                candidats[user.id] = user
 
     if not candidats:
         await interaction.followup.send("⚠️ Aucun candidat trouvé.", ephemeral=False)
@@ -1068,7 +1059,7 @@ async def candidats_naissance(interaction: discord.Interaction, message_id: str)
 
     # ── Liste des candidats avec mentions ─────────────────────────────────────
     # Formate chaque mention explicitement — évite les <@id> non résolus
-    lines = [f"• {m.mention}" for m in membres_tries]
+    lines = [f"• {m.display_name if hasattr(m, 'display_name') else m.name}" for m in membres_tries]
 
     # Découpe en blocs de 1024 caractères max (limite Discord)
     blocs, bloc_actuel = [], ""
@@ -1090,7 +1081,15 @@ async def candidats_naissance(interaction: discord.Interaction, message_id: str)
     embed.set_footer(text=f"Commande utilisée par {interaction.user.display_name}")
     embed.timestamp = discord.utils.utcnow()
 
-    await interaction.followup.send(embed=embed, ephemeral=False)
+    # Mentions dans le contenu du message (pas dans l'embed) = résolution fiable desktop + mobile
+    mentions_content = " ".join([m.mention for m in membres_tries]) if membres_tries else ""
+
+    await interaction.followup.send(
+        content   = mentions_content if mentions_content else None,
+        embed     = embed,
+        allowed_mentions = discord.AllowedMentions.none(),  # Pas de notifications
+        ephemeral = False
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
