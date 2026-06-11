@@ -87,7 +87,7 @@ FACTIONS = {
                 "role_id"     : 1267815975265501230,
                 "type"        : "special",
                 "label"       : "Garde royaux",
-                "max_membres" : 8,
+                "max_membres" : 6,
                 "chef_role_id": 1267815975303249976,
                 "chef_label"  : "Lord-Commandant de la Garde Royale",
                 "max_chef"    : 1,
